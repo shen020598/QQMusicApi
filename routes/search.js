@@ -1,4 +1,4 @@
-export default {
+module.exports = {
   // 搜索
   "/": async ({ req, res, request, cache }) => {
     let {
