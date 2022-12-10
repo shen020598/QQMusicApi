@@ -22,9 +22,9 @@ const globalCookie = GlobalCookie();
 // 每10分钟存一下数据
 config.useDataStatistics && setInterval(() => dataHandle.saveInfo(), 60000 * 10);
 
-// view engine setup, disabled to deploy on vercel
-// app.set('views', path.join(__dirname, 'views'));
-// app.set('view engine', 'jade');
+// view engine setup
+app.set('views', path.join(__dirname, 'views'));
+app.set('view engine', 'jade');
 
 app.use(logger('dev'));
 app.use(express.json());
