@@ -1,72 +1,145 @@
 module.exports = {
-  // 搜索
-  "/": async ({ req, res, request, cache }) => {
-    let {
+  '/': async ({req, res, request, globalCookie, cache}) => {
+    const obj = {...req.query, ...req.body};
+    let { uin, qqmusic_key } = globalCookie.userCookie();
+    if (Number(obj.ownCookie)) {
+      uin = req.cookies.uin || uin;
+    }
+
+    const {
       pageNo = 1,
       pageSize = 20,
       key,
       t = 0, // 0：单曲，2：歌单，7：歌词，8：专辑，9：歌手，12：mv
-      raw,
+      raw
     } = req.query;
     let total = 0;
 
     if (!key) {
       return res.send({
         result: 500,
-        errMsg: "关键词不能为空",
+        errMsg: '关键词不能为空',
       });
     }
 
+    // 缓存
     const cacheKey = `search_${key}_${pageNo}_${pageSize}_${t}`;
     const cacheData = cache.get(cacheKey);
     if (cacheData) {
       res && res.send(cacheData);
       return cacheData;
     }
-    const url = "https://u.y.qq.com/cgi-bin/musicu.fcg";
-    // 0：单曲
-    // 1：歌手
-    // 2：专辑
-    // 3：歌单
-    // 4：mv
-    // 7：歌词
-    // 8：用户
 
-    let data = {
-      "music.search.SearchCgiService": {
+    const url = 'https://u.y.qq.com/cgi-bin/musicu.fcg'
+
+    const typeMap = {
+      0: 'song',
+      2: 'album',
+      1: 'singer',
+      3: 'songlist',
+      7: 'lyric',
+      12: 'mv',
+    };
+    if (!typeMap[t]) {
+      return res.send({
+        result: 500,
+        errMsg: '搜索类型错误，检查一下参数 t',
+      });
+    }
+
+    const params = {
+      req_1: {
         method: "DoSearchForQQMusicDesktop",
         module: "music.search.SearchCgiService",
         param: {
-          num_per_page: pageSize,
-          page_num: pageNo,
+          num_per_page: Number(pageSize),
+          page_num: Number(pageNo),
           query: key,
-          search_type: t,
+          search_type: Number(t)
+        }
+      }
+    }
+    let result = {}
+
+    try {     
+      result = await request({
+        url,
+        method: 'POST',
+        data: params,
+        headers: {
+          Referer: 'https://y.qq.com'
         },
-      },
-    };
+      });
+    } catch (error) {
+      return res.send({
+        result: 400,
+        error
+      })
+    }
 
-    const result = await request({
-      url,
-      method: "post",
-      data,
-      headers: {
-        Referer: "https://y.qq.com",
-      },
-    });
-
+    // 直接返回原生数据
     if (Number(raw)) {
       return res.send(result);
     }
-    console.log("结果", result);
+    const response = {
+      result: 100,
+      data: {
+        list: Number(t) === 0 ? formatSongList(result.req_1.data.body[typeMap[t]].list) : result.req_1.data.body[typeMap[t]].list,
+        pageNo,
+        pageSize,
+        total: result.req_1.data.meta.sum,
+        key: result.req_1.data.meta.query || key,
+        t,
+        type: typeMap[t],
+      },
+    }
+    res.send(response);
+  },
 
-    // 下面是数据格式的美化
-    const { keyword, sum, perpage, curpage } =
-      result["music.search.SearchCgiService"].data.meta;
+  // 热搜词
+  '/hot': async ({req, res, request}) => {
+    const {raw} = req.query;
+    const result = await request({
+      url: 'https://c.y.qq.com/splcloud/fcgi-bin/gethotkey.fcg',
+    });
+    if (Number(raw)) {
+      return res.send(result);
+    }
+    res.send({
+      result: 100,
+      data: result.data.hotkey,
+    });
+  },
 
-    const searchResult =
-      result["music.search.SearchCgiService"].data.body.song.list || [];
-    //   (keyMap[t] ? result.data[keyMap[t]] : result.data) || [];
-    const list = searchResult.map((item) => ({
+  // 快速搜索
+  '/quick': async ({req, res, request}) => {
+    const {raw, key} = req.query;
+    if (!key) {
+      return res.send({
+        result: 500,
+        errMsg: 'key ?',
+      });
+    }
+    const result = await request(
+      `https://c.y.qq.com/splcloud/fcgi-bin/smartbox_new.fcg?key=${key}&g_tk=5381`,
+    );
+    if (Number(raw)) {
+      return res.send(result);
+    }
+    return res.send({
+      result: 100,
+      data: result.data,
+    });
+  },
+}
+
+function formatSongList(list) {
+  if (!Array.isArray(list)) {
+    return []
+  }
+  return list.map((item) => {
+    // 美化歌曲数据
+    return {
       singer: item.singer, // 、
       name: item.title,
       songid: item.id,
@@ -83,27 +156,7 @@ module.exports = {
       size320: item.file.size_320mp3,
       sizeape: item.file.size_ape,
       sizeflac: item.file.size_flac,
-    }));
-
-    pageNo = curpage;
-    pageSize = perpage;
-    total = sum;
-
-    const resData = {
-      result: 100,
-      data: {
-        list,
-        pageNo,
-        pageSize,
-        total,
-        key: keyword || key,
-        t,
-      },
-      // header: req.header(),
-      // req: JSON.parse(JSON.stringify(req)),
-    };
-    cache.set(cacheKey, resData, 120);
-    res.send && res.send(resData);
-    return resData;
-  },
-};
+      pay: item.pay || {}
+    }
+  })
+}
